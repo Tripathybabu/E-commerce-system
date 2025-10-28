@@ -5,12 +5,23 @@ import { useRouter } from 'next/navigation';
 
 interface Order {
   id: number;
-  total: number;
+  total?: number;
   productIds: number[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
+}
+
+interface Product {
+  id: number;
+  name: string;
+  imageUrl: string;
+  price: number;
 }
 
 export default function OrderSummaryPage() {
   const [order, setOrder] = useState<Order | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -21,9 +32,38 @@ export default function OrderSummaryPage() {
     }
   }, []);
 
+  useEffect(() => {
+    async function fetchProducts() {
+      try {
+        const res = await fetch('http://localhost:3000/products');
+        if (!res.ok) throw new Error('Failed to load products');
+        const data: Product[] = await res.json();
+        setProducts(data);
+      } catch (e) {
+        // ignore; we'll just hide item details if cannot load
+      }
+    }
+    fetchProducts();
+  }, []);
+
   if (!order) {
     return <p className="text-center text-text-secondary mt-10">Loading order summary...</p>;
   }
+
+  const hasBreakdown = typeof order.subtotal === 'number' || typeof order.discount === 'number' || typeof order.tax === 'number';
+  const computedTotal = typeof order.total === 'number'
+    ? order.total
+    : Math.max(0, (order.subtotal || 0) - (order.discount || 0)) + Math.max(0, ((order.subtotal || 0) - (order.discount || 0)) * 0) + (order.tax || 0);
+
+  const productMap = new Map(products.map(p => [p.id, p] as const));
+  const items = (() => {
+    if (!order) return [] as { id: number; qty: number; product?: Product }[];
+    const counts = new Map<number, number>();
+    for (const id of order.productIds || []) {
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([id, qty]) => ({ id, qty, product: productMap.get(id) }));
+  })();
 
   return (
     <div className="bg-primary min-h-screen text-text-primary flex items-center justify-center">
@@ -36,12 +76,56 @@ export default function OrderSummaryPage() {
 
         <div className="bg-primary rounded-lg p-6 space-y-4">
           <h2 className="text-xl font-bold">Invoice #{order.id}</h2>
-          <div className="border-t border-secondary pt-4">
+          <div className="border-t border-secondary pt-4 space-y-2">
+            {items.length > 0 && (
+              <div className="space-y-3">
+                {items.map(it => (
+                  <div key={it.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      {it.product ? (
+                        <img src={it.product.imageUrl} alt={it.product.name} className="w-12 h-12 rounded-lg object-cover" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-secondary" />
+                      )}
+                      <div>
+                        <p className="font-semibold">{it.product ? it.product.name : `Product #${it.id}`}</p>
+                        <p className="text-sm text-text-secondary">Qty: {it.qty}</p>
+                      </div>
+                    </div>
+                    <div className="text-right min-w-[80px]">
+                      {it.product && <span>${(it.product.price * it.qty).toFixed(2)}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasBreakdown && (
+              <>
+                {typeof order.subtotal === 'number' && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Subtotal</span>
+                    <span>${order.subtotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {typeof order.discount === 'number' && order.discount > 0 && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Discount</span>
+                    <span>- ${order.discount.toFixed(2)}</span>
+                  </div>
+                )}
+                {typeof order.tax === 'number' && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Tax</span>
+                    <span>${order.tax.toFixed(2)}</span>
+                  </div>
+                )}
+              </>
+            )}
             <div className="flex justify-between items-center font-bold text-2xl">
-              <span>Total Paid</span>
-              <span className="text-accent">${order.total.toFixed(2)}</span>
+              <span>Grand Total</span>
+              <span className="text-accent">${computedTotal.toFixed(2)}</span>
             </div>
-            <p className="text-text-secondary mt-2">Product IDs: {order.productIds.join(', ')}</p>
+            {/* Removed raw Product IDs from UI for cleaner look */}
           </div>
         </div>
 

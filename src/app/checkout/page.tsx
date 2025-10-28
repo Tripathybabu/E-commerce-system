@@ -132,7 +132,13 @@ export default function CheckoutPage() {
       const res = await fetch('http://localhost:3000/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId: selectedCustomerId, productIds }),
+        body: JSON.stringify({
+          customerId: selectedCustomerId,
+          productIds,
+          couponCode: appliedCoupon || undefined,
+          taxPct,
+          discount: discountValue || 0,
+        }),
       });
 
       if (!res.ok) throw new Error('Order placement failed');
@@ -140,6 +146,7 @@ export default function CheckoutPage() {
       const newOrder = await res.json();
       toast.success('Order placed successfully!');
       sessionStorage.setItem('order', JSON.stringify(newOrder));
+      sessionStorage.setItem('lastCustomerId', String(selectedCustomerId));
       router.push('/order-summary');
 
     } catch (error) {
@@ -270,22 +277,36 @@ export default function CheckoutPage() {
                     type="button"
                     className="bg-accent text-white font-bold px-4 rounded-lg"
                     onClick={() => {
-                      const code = couponCode.trim().toUpperCase();
-                      if (!code) return;
+                      const raw = couponCode.trim();
+                      if (!raw) return;
+                      const maybeAmount = Number(raw);
                       let discount = 0;
-                      if (code === 'SAVE10') {
-                        discount = cartTotal * 0.10;
-                      } else if (code === 'SAVE20') {
-                        discount = cartTotal * 0.20;
-                      } else if (code === 'FLAT50') {
-                        discount = 50;
+                      let codeLabel: string | null = null;
+                      if (Number.isFinite(maybeAmount) && maybeAmount > 0) {
+                        // Treat numeric input as a flat discount amount
+                        discount = maybeAmount;
+                        codeLabel = `FLAT-${maybeAmount}`;
                       } else {
-                        setAppliedCoupon(null);
-                        setDiscountValue(0);
-                        return;
+                        const code = raw.toUpperCase();
+                        if (code === 'SAVE10') {
+                          discount = cartTotal * 0.10;
+                          codeLabel = code;
+                        } else if (code === 'SAVE20') {
+                          discount = cartTotal * 0.20;
+                          codeLabel = code;
+                        } else if (code === 'FLAT50') {
+                          discount = 50;
+                          codeLabel = code;
+                        } else {
+                          setAppliedCoupon(null);
+                          setDiscountValue(0);
+                          return;
+                        }
                       }
-                      setAppliedCoupon(code);
-                      setDiscountValue(Number(discount.toFixed(2)));
+                      // Clamp to subtotal
+                      const clamped = Math.min(discount, cartTotal);
+                      setAppliedCoupon(codeLabel);
+                      setDiscountValue(Number(clamped.toFixed(2)));
                     }}
                   >
                     Apply

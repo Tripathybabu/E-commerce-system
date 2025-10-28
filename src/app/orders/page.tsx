@@ -20,16 +20,24 @@ interface Product {
   price: number;
 }
 
+interface Customer {
+  id: number;
+  name: string;
+  email: string;
+}
+
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
-  const customerId = 1; // Hardcoded for now
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
 
   useEffect(() => {
-    async function fetchOrders() {
+    async function fetchOrders(cid: number) {
       try {
-        const res = await fetch(`http://localhost:3000/orders/customer/${customerId}`);
+        const res = await fetch(`http://localhost:3000/orders/customer/${cid}`);
         if (!res.ok) throw new Error('Failed to fetch orders');
         const data = await res.json();
         setOrders(data);
@@ -49,9 +57,50 @@ export default function OrdersPage() {
         console.error(e);
       }
     }
-    fetchOrders();
+    async function fetchCustomersAll() {
+      try {
+        const res = await fetch('http://localhost:3001/customers');
+        if (!res.ok) throw new Error('Failed to fetch customers');
+        const data: Customer[] = await res.json();
+        setCustomers(data);
+        // Resolve initial customerId: session -> first customer -> 1
+        const stored = typeof window !== 'undefined' ? sessionStorage.getItem('lastCustomerId') : null;
+        const fromSession = stored ? Number(stored) : undefined;
+        const initial = Number.isFinite(fromSession as number) && (fromSession as number)! > 0
+          ? (fromSession as number)
+          : (data[0]?.id ?? 1);
+        setCustomerId(initial);
+        fetchOrders(initial);
+      } catch (e) {
+        console.error(e);
+        // Fallback
+        const fallback = 1;
+        setCustomerId(fallback);
+        fetchOrders(fallback);
+      } finally {
+        setLoadingCustomers(false);
+      }
+    }
+
     fetchProductsAll();
+    fetchCustomersAll();
   }, []);
+
+  // Refetch orders when customer changes
+  useEffect(() => {
+    async function refetch() {
+      if (!customerId) return;
+      try {
+        const res = await fetch(`http://localhost:3000/orders/customer/${customerId}`);
+        if (!res.ok) throw new Error('Failed to fetch orders');
+        const data = await res.json();
+        setOrders(data);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    refetch();
+  }, [customerId]);
 
   const productMap = new Map(products.map(p => [p.id, p] as const));
 
@@ -79,13 +128,29 @@ export default function OrdersPage() {
       </header>
 
       <main className="container mx-auto px-6 py-12">
-        <div className="mb-12">
-          <h1 className="text-4xl font-extrabold mb-2">Order History</h1>
-          <p className="text-lg text-text-secondary">View and track your past orders</p>
+        <h1 className="text-4xl font-extrabold mb-8">Orders</h1>
+        <div className="bg-secondary p-4 rounded-lg mb-6">
+          <label className="block mb-2 text-sm text-text-secondary">Select Customer</label>
+          <select
+            className="w-full p-3 bg-primary border border-secondary rounded-lg max-w-md"
+            value={customerId ?? ''}
+            onChange={(e) => {
+              const id = e.target.value ? Number(e.target.value) : null;
+              setCustomerId(id);
+              if (id) sessionStorage.setItem('lastCustomerId', String(id));
+            }}
+          >
+            <option value="">{loadingCustomers ? 'Loading customers...' : 'Select a customer'}</option>
+            {customers.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         </div>
-
         {isLoading ? (
-          <p className="text-center text-text-secondary">Loading orders...</p>
+          <div className="flex flex-col items-center justify-center py-24">
+            <IconBox />
+            <p className="text-text-secondary mt-4">Loading orders...</p>
+          </div>
         ) : orders.length === 0 ? (
           <div className="text-center bg-secondary rounded-lg p-16">
             <div className="w-24 h-24 bg-primary rounded-full flex items-center justify-center mx-auto mb-6">
@@ -130,9 +195,29 @@ export default function OrdersPage() {
                       </div>
                     ))}
                   </div>
-                  <div className="border-t border-primary mt-4 pt-3 flex justify-between font-bold">
-                    <span>Total</span>
-                    <span>${order.total.toFixed(2)}</span>
+                  <div className="border-t border-primary mt-4 pt-3 space-y-1">
+                    {typeof (order as any).subtotal === 'number' && (
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Subtotal</span>
+                        <span>${(order as any).subtotal.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {typeof (order as any).discount === 'number' && (order as any).discount > 0 && (
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Discount</span>
+                        <span>- ${(order as any).discount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {typeof (order as any).tax === 'number' && (
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Tax</span>
+                        <span>${(order as any).tax.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold text-lg pt-2">
+                      <span>Total</span>
+                      <span>${order.total.toFixed(2)}</span>
+                    </div>
                   </div>
                 </div>
               </div>
